@@ -34,7 +34,9 @@ ISR(INT0_vect) {
     }
     else {
         // write result
-        elapsed = TCNT1;
+        if (!transferStarted) {
+            elapsed = TCNT1;
+        }
         // trigger overflow
         TCNT1 = 0xFF;
     }
