@@ -6,69 +6,73 @@
 volatile uint8_t regToGet = 0;
 volatile uint16_t elapsed = 0;
 volatile uint8_t transferStarted = 0;
+volatile uint8_t readyToTrigger = 1;
 
+// i2c interrupts
 ISR(TWI_vect)
 {
-    cli();
     uint8_t status = TWSR & 0b11111000;
     if (status == TW_SR_DATA_ACK || status == TW_SR_DATA_NACK) {
-        regToGet = TWDR;
+        regToGet = TWDR; // not needed now
     }
-    if (status == TW_ST_SLA_ACK || status == TW_ST_DATA_ACK) {
-        switch (regToGet)
-        {
-        case 1:
-            TWDR = (uint8_t)elapsed;
-            transferStarted = 0;
-            break;
-        default:
-            TWDR = (uint8_t)(elapsed >> 8);
-            transferStarted = 1;
-            break;
-        }
+    if (status == TW_ST_SLA_ACK) {
+        TWDR = (uint8_t)(elapsed);
+        transferStarted = 1;
     }
-    // if (status != TW_SR_SLA_ACK && status != TW_ST_SLA_ACK && status != TW_ST_ARB_LOST_SLA_ACK && status != TW_ST_DATA_ACK) {
-    //     TWCR |= (1<<TWEA);
-    // }
-    TWCR |= (1<<TWINT);
-    sei();
+    if (status == TW_ST_DATA_ACK) {
+        TWDR = (uint8_t)(elapsed >> 8);
+        transferStarted = 0;
+    }
+    TWCR |= (1 << TWINT);
+}
+
+// echo pin change interrupt
+ISR(INT0_vect) {
+    if (PIND & (1 << 2)) {
+         // reset timer
+        TCNT1 = 0;
+    }
+    else {
+        // write result
+        elapsed = TCNT1;
+        // trigger overflow
+        TCNT1 = 0xFF;
+    }
+}
+
+// timer overflow interrupt
+ISR(TIMER1_OVF_vect) {
+    readyToTrigger = 1;
 }
 
 int main (void)
 {
-    DDRB |= (1 << 3); // sensor trig
-    DDRB &= ~(1 << 4); // sensor echo
+    DDRD |= (1 << 3); // sensor trig
+    DDRD &= ~(1 << 2); // sensor echo
     
     TWAR = (0x13 << 1); // i2c address is set to 0x13
     TWDR = 0x00; // default i2c data
 
     TCCR1B |= (1 << CS11);  // timer with clock/8 prescaling 1000000 per second
 
-    TWCR = (1<<TWINT) | (1<<TWEA) | (1<<TWEN) | (1<<TWIE); // enable i2c
+    TWCR = (1 << TWINT) | (1 << TWEA) | (1 << TWEN) | (1 << TWIE); // enable i2c
+
+    // enable interrupts on int0 pin
+    EICRA = (1 << ISC00);
+    EIMSK |= (1 << INT0);
+
+    // enable interrupts on timer1 overflow
+    TIMSK1 = (1 << TOIE1);
 
     sei();
     
     while(1) {
-        // trigger sensor
-        PORTB |= (1 << 3); 
-        _delay_ms(10);
-        PORTB &= ~(1 << 3);
-        // wait for 1 on echo pin
-        while (!(PINB & (1 << 4))) {}
-
-        // todo start timer
-        TCNT1 = 0;
-
-        // wait for 0 on echo pin
-        while (PINB & (1 << 4)) {}
-
-        // end timer and write result
-        cli();
-        if (!transferStarted)
-        {
-            elapsed = TCNT1;
+        if (readyToTrigger) {
+            readyToTrigger = 0;
+            PORTD |= (1 << 3); 
+            _delay_ms(1);
+            PORTD &= ~(1 << 3);
         }
-        sei();
     }
     return 0;
 }
