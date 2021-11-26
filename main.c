@@ -8,22 +8,17 @@ volatile uint16_t elapsed = 0;
 volatile uint8_t transferStarted = 0;
 volatile uint8_t readyToTrigger = 1;
 
-// i2c interrupts
-ISR(TWI_vect)
+// spi interrupts
+ISR(SPI_STC_vect)
 {
-    uint8_t status = TWSR & 0b11111000;
-    if (status == TW_SR_DATA_ACK || status == TW_SR_DATA_NACK) {
-        regToGet = TWDR; // not needed now
-    }
-    if (status == TW_ST_SLA_ACK) {
-        TWDR = (uint8_t)(elapsed);
+    uint8_t inputData = SPDR;
+    if (inputData == 1) {
+        SPDR = (uint8_t)(elapsed >> 8);
         transferStarted = 1;
-    }
-    if (status == TW_ST_DATA_ACK) {
-        TWDR = (uint8_t)(elapsed >> 8);
+    } else if (inputData == 2) {
+        SPDR = (uint8_t)(elapsed);
         transferStarted = 0;
     }
-    TWCR |= (1 << TWINT);
 }
 
 // echo pin change interrupt
@@ -51,13 +46,11 @@ int main (void)
 {
     DDRD |= (1 << 3); // sensor trig
     DDRD &= ~(1 << 2); // sensor echo
-    
-    TWAR = (0x13 << 1); // i2c address is set to 0x13
-    TWDR = 0x00; // default i2c data
 
     TCCR1B |= (1 << CS11);  // timer with clock/8 prescaling 1000000 per second
 
-    TWCR = (1 << TWINT) | (1 << TWEA) | (1 << TWEN) | (1 << TWIE); // enable i2c
+    SPCR = (1 << SPE) | (1 << SPIE); // Enable SPI and corresponding interrupt
+    DDRB = (1 << 4); // Set MISO output
 
     // enable interrupts on int0 pin
     EICRA = (1 << ISC00);

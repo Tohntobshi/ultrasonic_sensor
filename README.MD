@@ -1,4 +1,6 @@
-# AVR program for transforming ultrasonic sensor interface to digital i2c data
+# auxillary controller for rcontrol_2
+
+it sends time measurements from ultrasonic sensor via spi
 
 ## Compiling
 packages necessary for compiling
