@@ -1,23 +1,32 @@
 #include <avr/io.h>
 #include <util/delay.h>
-#include <compat/twi.h>
 #include <avr/interrupt.h>
 
-volatile uint8_t regToGet = 0;
-volatile uint16_t elapsed = 0;
-volatile uint8_t transferStarted = 0;
-volatile uint8_t readyToTrigger = 1;
+volatile uint16_t result = 0;
+volatile uint8_t msb = 0;
+volatile uint8_t lsb = 0;
+volatile uint8_t chksum = 0;
+volatile uint8_t chksum2 = 0;
+volatile uint8_t samplingStarted = 0;
 
 // spi interrupts
 ISR(SPI_STC_vect)
 {
     uint8_t inputData = SPDR;
-    if (inputData == 1) {
-        SPDR = (uint8_t)(elapsed >> 8);
-        transferStarted = 1;
+    if (inputData == 0) {
+        // start transaction, prepare data
+        msb = (uint8_t)(result >> 8);
+        lsb = (uint8_t)(result);
+        chksum = (msb >> 4) + (msb & 0b00001111) + (lsb >> 4) + (lsb & 0b00001111);
+        chksum2 = (~msb) + (~lsb);
+    } else if (inputData == 1) {
+        SPDR = msb;
     } else if (inputData == 2) {
-        SPDR = (uint8_t)(elapsed);
-        transferStarted = 0;
+        SPDR = lsb;
+    } else if(inputData == 3) {
+        SPDR = chksum;
+    } else if(inputData == 4) {
+        SPDR = chksum2;
     }
 }
 
@@ -26,20 +35,12 @@ ISR(INT0_vect) {
     if (PIND & (1 << 2)) {
          // reset timer
         TCNT1 = 0;
+        samplingStarted = 1;
     }
     else {
-        // write result
-        if (!transferStarted) {
-            elapsed = TCNT1;
-        }
-        // trigger overflow
-        TCNT1 = 0xFF;
+        result = ((uint32_t)TCNT1 * 2 + (uint32_t)result * 6) >> 3;
+        samplingStarted = 0;
     }
-}
-
-// timer overflow interrupt
-ISR(TIMER1_OVF_vect) {
-    readyToTrigger = 1;
 }
 
 int main (void)
@@ -56,18 +57,17 @@ int main (void)
     EICRA = (1 << ISC00);
     EIMSK |= (1 << INT0);
 
-    // enable interrupts on timer1 overflow
-    TIMSK1 = (1 << TOIE1);
 
     sei();
     
     while(1) {
-        if (readyToTrigger) {
-            readyToTrigger = 0;
+        if (samplingStarted == 0) {
+            _delay_us(10);
             PORTD |= (1 << 3); 
-            _delay_ms(1);
+            _delay_us(10);
             PORTD &= ~(1 << 3);
         }
+        _delay_us(100);
     }
     return 0;
 }
